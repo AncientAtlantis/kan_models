@@ -10,7 +10,8 @@ class SegmentKanLayer(tf.Module):
                  grid_size=10,
                  delta=1e-8,
                  initializer=tf.random_normal_initializer(mean=0.0,stddev=0.1),
-                 precision=tf.float64,
+                 precision=tf.float32,
+                 idx_precision=tf.int32,
                  name_prefix='SegmentKanLayer'):
         
         super().__init__(name=name_prefix)
@@ -20,6 +21,7 @@ class SegmentKanLayer(tf.Module):
         self.delta=delta
         self.initializer=initializer
         self.precision=precision
+        self.idx_precision=idx_precision
         self.name_prefix=name_prefix    
         self.is_build=False
     
@@ -35,15 +37,20 @@ class SegmentKanLayer(tf.Module):
     def __call__(self,inputs):
         if not self.is_build:
             self.build()
-        
-        #The forward propagation
-        #inputs with shape of (..., in_size)
 
+
+        """
+            The forward propagation
+        """
         #Map inputs within (-1, 1)
+        #inputs: (..., in_size)
         self.inputs_shape=inputs.shape
         inputs=tf.math.tanh(tf.cast(inputs,self.precision))
 
-        #Rescale each input to span over (-1,1)
+
+        """
+            Rescale each input to span over (-1,1)
+        """
         inputs_min=tf.math.reduce_min(inputs,axis=-1,keepdims=True)
         inputs_max=tf.math.reduce_max(inputs,axis=-1,keepdims=True)
         inputs_span=inputs_max-inputs_min
@@ -52,13 +59,16 @@ class SegmentKanLayer(tf.Module):
         inputs=tf.cast(2.0,self.precision)*(inputs-inputs_min)/denominator-tf.cast(1.0,self.precision)
         inputs=inputs*tf.cast(1.0-self.delta,self.precision)
 
-        #Build indices tensor: (..., in_size, out_size, 3)
+
+        """
+            Build indices tensor: (..., in_size, out_size, 3)
+        """
         #seg_idx_l, seg_idx_h, mods: (..., in_size, out_size, 1)
         delta_l=tf.cast(2.0/(self.grid_size-1),self.precision)
         xs=inputs+tf.cast(1.0,self.precision)
         seg_idx_l=tf.math.floordiv(xs,delta_l)
-        seg_idx_l=tf.cast(seg_idx_l,tf.int32)
-        seg_idx_h=seg_idx_l+tf.cast(1,tf.int32)
+        seg_idx_l=tf.cast(seg_idx_l,self.idx_precision)
+        seg_idx_h=seg_idx_l+tf.cast(1,self.idx_precision)
         mods=tf.math.floormod(xs,delta_l)
         for j in range(2):
             seg_idx_h=tf.expand_dims(seg_idx_h,axis=-1)
@@ -68,9 +78,10 @@ class SegmentKanLayer(tf.Module):
         seg_idx_h=seg_idx_h+zeros
         seg_idx_l=seg_idx_l+zeros
         mods=mods+zeros
+
         #IN, OUT: (..., in_size, out_size, 1)
-        ins=tf.range(0,self.in_size,dtype=tf.int32)
-        outs=tf.range(0,self.out_size,dtype=tf.int32)
+        ins=tf.range(0,self.in_size,dtype=self.idx_precision)
+        outs=tf.range(0,self.out_size,dtype=self.idx_precision)
         IN,OUT=tf.meshgrid(ins,outs,indexing='ij')
         IN,OUT=tf.expand_dims(IN,axis=-1),tf.expand_dims(OUT,axis=-1)
         if len(self.inputs_shape)>1:
@@ -80,7 +91,10 @@ class SegmentKanLayer(tf.Module):
         indices_l=tf.concatnate([IN,OUT,seg_idx_l],axis=-1)
         indices_h=tf.concatnate([IN,OUT,seg_idx_h],axis=-1)
 
-        #Draw coeff from indices
+
+        """
+            Draw coeff from indices
+        """
         #matrix_l, matrix_h, matrix: (..., in_size, out_size)
         matrix_l=tf.gather_nd(self.coeff,indices_l)
         matrix_h=tf.gather_nd(self.coeff,indices_h)
@@ -91,6 +105,96 @@ class SegmentKanLayer(tf.Module):
         #Outputs: (..., out_size)
         outputs=tf.matmul(matrix,tf.expand_dims(inputs,axis=-1),transpose_a=True)
         return tf.squeeze(outputs)
+
+
+class SegmentKanLayerV2(tf.Module):
+    """
+        Another implementation of SegmentKanLayer
+    """
+    def __init__(self,
+                 in_size=300,
+                 out_size=300,
+                 grid_size=10,
+                 delta=1e-8,
+                 initializer=tf.random_normal_initializer(mean=0.0,stddev=0.1),
+                 precision=tf.float32,
+                 idx_precision=tf.int32,
+                 name_prefix='SegmentKanLayer'):
+        
+        super().__init__(name=name_prefix)
+        self.in_size=in_size
+        self.out_size=out_size
+        self.grid_size=grid_size
+        self.delta=delta
+        self.initializer=initializer
+        self.precision=precision
+        self.idx_precision=idx_precision
+        self.name_prefix=name_prefix    
+        self.is_build=False
+    
+    def build(self):
+        if not self.is_build:
+            #coeff: (in_size, out_size, grid_size-1)
+            #grids: (in_size, out_size, grid_size)
+            self.coeff=tf.Variable(self.initializer([self.in_size,self.out_size,self.grid_size-1]),
+                                   dtype=self.precision,
+                                   name=self.name_prefix+'_coeff',
+                                   trainable=True)
+            grids=tf.linspace(-1.0,1.0,self.grid_size)
+            for i in range(2):
+                grids=tf.expand_dims(grids,axis=0)
+            grids=tf.tile(grids,[self.in_size,self.out_size,1])
+            self.grids=tf.cast(grids,self.precision)
+            self.is_build=True
+    
+    @tf.function
+    def __call__(self,inputs):
+        if not self.is_build:
+            self.build()
+
+
+        """
+            The forward propagation
+        """
+        #Map inputs within (-1, 1)
+        inputs=tf.math.tanh(tf.cast(inputs,self.precision))
+
+
+        """
+            Rescale each input to span over (-1,1)
+        """
+        inputs_min=tf.math.reduce_min(inputs,axis=-1,keepdims=True)
+        inputs_max=tf.math.reduce_max(inputs,axis=-1,keepdims=True)
+        inputs_span=inputs_max-inputs_min
+        small=tf.ones_like(inputs,dtype=self.precision)*tf.cast(self.delta,self.precision)
+        denominator=tf.where(inputs_span==0.0,small,inputs_span)
+        inputs=tf.cast(2.0,self.precision)*(inputs-inputs_min)/denominator-tf.cast(1.0,self.precision)
+        inputs=inputs*tf.cast(1.0-self.delta,self.precision)
+
+
+        """
+            Build the batch matrix of segment bias function
+        """
+        #xs: (..., in_size, out_size, 1)
+        xs=tf.expand_dims(inputs,axis=-1)+\
+           tf.zeros([self.in_size,self.out_size],dtype=self.precision)
+        xs=tf.expand_dims(xs,axis=-1)
+
+        #batch_matrix: (..., in_size, out_size, grid_size-1)
+        #grids: (in_size, out_size, grid_size)
+        batch_matrix=tf.cast(xs>=self.grids[:,:,:-1] & xs<self.grids[:,:,1:],\
+                             self.precision)
+
+        """
+            Compose the weight matrix 
+        """
+        #matrix: (..., in_size, out_size)
+        matrix=tf.einsum(batch_matrix,self.coeff,'...ijk,ijk->...ij')
+
+        #outputs: (..., out_size, 1)
+        outputs=tf.matmul(matrix,tf.expand_dims(inputs,axis=-1),transpose_a=True)
+        return tf.squeeze(outputs)
+
 
 class FourierKanLayer(tf.Module):
     def __init__(self,
