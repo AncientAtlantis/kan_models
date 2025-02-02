@@ -16,6 +16,45 @@ type_map={'fourier':FourierKanLayer,\
           'segmentv2':SegmentKanLayerV2}
 
 
+default_layer_configs={'fourier':{\
+                            'grid_size':20,\
+                            'alpha_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'beta_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'precision':tf.float32,\
+                            },\
+                        'mlp':{
+                            'w_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'b_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'bias_function':tf.nn.relu,\
+                            'precision':tf.float32,\
+                            },\
+                        'spline':{
+                            'grid_size':10,\
+                            'k':3,\
+                            'half_range':1.0,\
+                            'bias_functioin':tf.nn.silu,\
+                            'scale_base_trainable':True,\
+                            'scale_bias_trainable':True,\
+                            'scale_bias_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'scale_base_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'coeff_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'precision':tf.float32,\
+                            },
+                        'segment':{
+                            'grid_size':10,\
+                            'delta':1e-8,\
+                            'initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'precision':tf.float32,\
+                            'idx_precision':tf.int32,\
+                            },
+                        'segmentv2':{
+                            'grid_size':10,\
+                            'delta':1e-8,\
+                            'initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
+                            'precision':tf.float32,\
+                        }}
+
+
 class Sequential(tf.Module):
     """
         The Sequential model composed by several layers
@@ -24,50 +63,15 @@ class Sequential(tf.Module):
                  in_size=400,\
                  n_neurons=[300,300,300,300,1],\
                  layer_types=['fourier','mlp','spline','segment','segmentv2'],\
-                 layer_configs=[{\
-                                    'grid_size':20,\
-                                    'alpha_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'beta_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'precision':tf.float32,\
-                                },\
-                                {
-                                    'w_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'b_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'bias_function':tf.nn.relu,\
-                                    'precision':tf.float32,\
-                                },\
-                                {
-                                    'grid_size':10,\
-                                    'k':3,\
-                                    'half_range':1.0,\
-                                    'bias_functioin':tf.nn.silu,\
-                                    'scale_base_trainable':True,\
-                                    'scale_bias_trainable':True,\
-                                    'scale_bias_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'scale_base_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'coeff_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'precision':tf.float32,\
-                                },
-                                {
-                                    'grid_size':10,\
-                                    'delta':1e-8,\
-                                    'initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'precision':tf.float32,\
-                                    'idx_precision':tf.int32,\
-                                },
-                                {
-                                    'grid_size':10,\
-                                    'delta':1e-8,\
-                                    'initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
-                                    'precision':tf.float32,\
-                                }],\
+                 layer_configs=default_layer_configs,\
                  name_prefix='Sequential'):
         super().__init__(name=name_prefix)
         self.layers=[]
-        for layer,(out_dim,config,l_type) in enumerate(zip(n_neurons,layer_configs,layer_types)):
+        for layer,(out_dim,l_type) in enumerate(zip(n_neurons,layer_types)):
             in_dim=in_size if layer==0 else n_neurons[layer-1]
             prefix=name_prefix+'_'+l_type+'_{:d}'.format(layer)
-            self.layers.append((type_map[l_type])(in_dim,out_dim,**config,name_prefix=prefix))            
+            cfg=layer_configs[l_type]
+            self.layers.append((type_map[l_type])(in_dim,out_dim,**cfg,name_prefix=prefix))            
         self.is_build=False
     
     def build(self):
@@ -92,5 +96,5 @@ class Sequential(tf.Module):
 
 
 if __name__=='__main__':
-    #test block
+    
     pass
