@@ -119,7 +119,6 @@ class SegmentKanLayerV2(tf.Module):
                  delta=1e-8,
                  initializer=tf.random_normal_initializer(mean=0.0,stddev=0.1),
                  precision=tf.float32,
-                 idx_precision=tf.int32,
                  name_prefix='SegmentKanLayer'):
         
         super().__init__(name=name_prefix)
@@ -129,7 +128,6 @@ class SegmentKanLayerV2(tf.Module):
         self.delta=delta
         self.initializer=initializer
         self.precision=precision
-        self.idx_precision=idx_precision
         self.name_prefix=name_prefix    
         self.is_build=False
     
