@@ -133,9 +133,10 @@ class Sequential(tf.Module):
             loss=self.loss(y_batch,y_pred_batch)
         grads=tape.gradient(loss,self.trainable_variables)
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
+        self.__update_metrics(y_batch,y_pred_batch)
         return loss
     
-    
+    @tf.function
     def __validation_step(self,x_val_batch,y_val_batch):
         y_val_batch_pred=self(x_val_batch)
         loss=self.loss(y_val_batch,y_val_batch_pred)
@@ -184,7 +185,6 @@ class Sequential(tf.Module):
                 print(messg)
                 messg_container.append(messg)
 
-    @tf.function
     def train(self,\
               x=None,\
               y=None,\
@@ -249,6 +249,7 @@ if __name__=='__main__':
     x_test,y_test,x_train,y_train=data['x_test'],data['y_test'],data['x_train'],data['y_train']
     y_test,y_train=to_categorical(y_test),to_categorical(y_train)
 
+    
     #define the model
     from tensorflow.keras.optimizers import Adam
 

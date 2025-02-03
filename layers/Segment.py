@@ -146,7 +146,7 @@ class SegmentKanLayerV2(tf.Module):
             self.grids=tf.cast(grids,self.precision)
             self.is_build=True
     
-    @tf.function
+
     def __call__(self,inputs):
         #inputs: (..., in_size)
 

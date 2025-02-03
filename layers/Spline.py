@@ -70,7 +70,6 @@ class SplineKanLayer(tf.Module):
         #values: (in, out, grid_size-1+k)
         return values
 
-    @tf.function
     def __call__(self,inputs):
         if not self.is_build:
             self.build()

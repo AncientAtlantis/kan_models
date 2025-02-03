@@ -37,7 +37,6 @@ class MLPLayer(tf.Module):
                                trainable=True)
             self.is_build=True
 
-    @tf.function
     def __call__(self,inputs):
         if not self.is_build:
             self.build()
