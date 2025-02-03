@@ -48,6 +48,7 @@ class FourierKanLayer(tf.Module):
             The forward propagation
         """
         #Map inputs within (-pi, pi)
+        inputs=tf.cast(inputs,self.precision)
         inputs=tf.math.tanh(tf.cast(inputs,self.precision))*self.pi
 
 
@@ -70,8 +71,8 @@ class FourierKanLayer(tf.Module):
             Compose outputs 
         """
         #matrix: (..., in_size, out_size)
-        matrix_alpha=tf.einsum(batch_mat_cos,self.coeff_alpha,'...ijk,ijk->...ij')
-        matrix_beta=tf.einsum(batch_mat_sin,self.coeff_beta,'...ijk,ijk->...ij')
+        matrix_alpha=tf.einsum('...ijk,ijk->...ij',batch_mat_cos,self.coeff_alpha)
+        matrix_beta=tf.einsum('...ijk,ijk->...ij',batch_mat_sin,self.coeff_beta)
 
         #outputs: (..., out_size)
         outputs=tf.math.reduce_sum(matrix_alpha+matrix_beta,axis=-2)

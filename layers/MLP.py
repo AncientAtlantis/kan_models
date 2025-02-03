@@ -47,6 +47,7 @@ class MLPLayer(tf.Module):
         """
         #inputs: (..., in)
         #w: (in, out)
+        inputs=tf.cast(inputs,self.precision)
         hidden=tf.nn.bias_add(tf.matmul(inputs,self.w),self.b)
         return self.bias_function(hidden)
 

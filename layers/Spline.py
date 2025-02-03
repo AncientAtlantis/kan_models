@@ -95,7 +95,7 @@ class SplineKanLayer(tf.Module):
 
         """
         #values, v_base: (in, out)
-        values=tf.einsum(mat,self.coeff,'ijk,ijk->ij')
+        values=tf.einsum('ijk,ijk->ij',mat,self.coeff)
         v_base=values*self.scale_bases
         #v_biases: (..., in, out)
         inputs=tf.expand_dims(self.bias_functioin(inputs),axis=-1) #(..., in, 1)

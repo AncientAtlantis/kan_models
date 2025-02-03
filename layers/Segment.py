@@ -44,6 +44,7 @@ class SegmentKanLayer(tf.Module):
         """
         #Map inputs within (-1, 1)
         #inputs: (..., in_size)
+        inputs=tf.cast(inputs,self.precision)
         self.inputs_shape=inputs.shape
         inputs=tf.math.tanh(tf.cast(inputs,self.precision))
 
@@ -158,6 +159,7 @@ class SegmentKanLayerV2(tf.Module):
             The forward propagation
         """
         #Map inputs within (-1, 1)
+        inputs=tf.cast(inputs,self.precision)
         inputs=tf.math.tanh(tf.cast(inputs,self.precision))
 
 
@@ -190,7 +192,7 @@ class SegmentKanLayerV2(tf.Module):
             Compose the weight matrix 
         """
         #matrix: (..., in_size, out_size)
-        matrix=tf.einsum(batch_matrix,self.coeff,'...ijk,ijk->...ij')
+        matrix=tf.einsum('...ijk,ijk->...ij',batch_matrix,self.coeff)
 
         #outputs: (..., out_size, 1)
         outputs=tf.matmul(matrix,tf.expand_dims(inputs,axis=-1),transpose_a=True)

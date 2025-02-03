@@ -66,7 +66,8 @@ class Sequential(tf.Module):
                  n_neurons=[300,300,300,300,10],\
                  layer_types=['fourier','mlp','spline','segment','segmentv2'],\
                  layer_configs=default_layer_configs,\
-                 post_ac_func=tf.nn.softmax,
+                 post_ac_func=tf.nn.softmax,\
+                 precision=tf.float32,\
                  name_prefix='Sequential'):
         super().__init__(name=name_prefix)
         self.layers=[]
@@ -99,52 +100,58 @@ class Sequential(tf.Module):
         """
             The forward propagation
         """
-        for i,li in enumerate(self.layers):
-            outs=li(inputs if i==0 else outs)
+        for i,layer in enumerate(self.layers):
+            if i==0:
+                outs=layer(inputs)
+            else:
+                outs=layer(outs)
+
         if self.post_ac_func:
             return self.post_ac_func(outs)
         else:
             return outs
-        
+
+
     def setup(self,\
-              optimizer=tf.keras.optimizer.Adam(learning_rate=1e-3),\
+              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),\
               loss=tf.keras.losses.CategoricalCrossentropy(),
-              metrics=[tf.keras.metrics.CatrgoricalAccuracy()]):
+              metrics=[tf.keras.metrics.CategoricalAccuracy()]):
         self.optimizer=optimizer
         self.loss=loss
         self.metrics=metrics
         self.is_compiled=True
 
 
-    def __update_metrics(self,y,y_pred):
+    def update_metrics(self,y,y_pred):
         for mi in self.metrics:
             mi.update_state(y,y_pred)
     
 
-    def __reset_metrics(self):
+    def reset_metrics(self):
         for mi in self.metrics:
-            mi.reset_states()
-        
+            mi.reset_state()
+
+
     @tf.function
-    def __train_step(self,x_batch,y_batch):
+    def train_step(self,x_batch,y_batch):
         #Apply gradients and update metrics
         with tf.GradientTape() as tape:
             y_pred_batch=self(x_batch)
             loss=self.loss(y_batch,y_pred_batch)
         grads=tape.gradient(loss,self.trainable_variables)
         self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
-        self.__update_metrics(y_batch,y_pred_batch)
+        self.update_metrics(y_batch,y_pred_batch)
         return loss
     
     @tf.function
-    def __validation_step(self,x_val_batch,y_val_batch):
+    def validation_step(self,x_val_batch,y_val_batch):
         y_val_batch_pred=self(x_val_batch)
         loss=self.loss(y_val_batch,y_val_batch_pred)
-        self.__update_metrics(y_val_batch,y_val_batch_pred)
+        self.update_metrics(y_val_batch,y_val_batch_pred)
         return loss
     
 
-    def __single_epoach_loop(self,\
+    def single_epoach_loop(self,\
                              x,\
                              y,\
                              epoach=0,
@@ -162,9 +169,10 @@ class Sequential(tf.Module):
             total_steps=round_steps if reminder==0 else round_steps+1
         
         #The inner loop 
+        start_time=tf.timestamp()
         for step in range(total_steps):
             #The accumulated training steps
-            acc_steps=step*int(batch_size)+total_steps*epoach
+            acc_steps=step+total_steps*epoach
 
             #Draw a batch from data set
             idx_beg=step*batch_size
@@ -172,17 +180,20 @@ class Sequential(tf.Module):
             
             #Perform a single step
             if apply_gradient:
-                loss=self.__train_step(x_batch,y_batch)
+                loss=self.train_step(x_batch,y_batch)
             else:
-                loss=self.__validation_step(x_batch,y_batch)            
+                loss=self.validation_step(x_batch,y_batch)            
             
             #Outputs key infos every print_freq steps
             if acc_steps%print_freq==0:
-                messg=f'{messg_prefix}, epoach: {epoach}, current steps: {step}, accumulated steps: {acc_steps}, loss: {loss:.6f}'
+                end_time=tf.timestamp()
+                training_time=end_time-start_time
+                start_time=tf.timestamp()
+                messg=f'{messg_prefix}, epoach: {epoach}, current steps: {step}, accumulated steps: {acc_steps}, loss: {loss:.6f}, lr: {self.optimizer.learning_rate.numpy():.5e}, time: {training_time:.3f} (s)'
                 for mi in self.metrics:
-                    messg_add=f', {mi.__name__}: {mi.results.numpy():.6f}'
+                    messg_add=f', {mi.name}: {mi.result().numpy():.6f}'
                     messg=messg+messg_add
-                print(messg)
+                tf.print(messg)
                 messg_container.append(messg)
 
     def train(self,\
@@ -198,11 +209,12 @@ class Sequential(tf.Module):
         
         #assertations of data types and shapes
         assert self.is_compiled
-        assert tf.is_tensor(x) and tf.is_tensor(y)
+        x,y=tf.convert_to_tensor(x),tf.convert_to_tensor(y)
         assert x.shape[0]==y.shape[0]
         if validation_data:
-            assert len(validation_data)==2 and tf.is_tensor(validation_data[0]) and tf.is_tensor(validation_data[1])
-            assert validation_data[0].shape[0]==validation_data[1].shape[0]
+            assert len(validation_data)==2
+            x_val,y_val=tf.convert_to_tensor(validation_data[0]),tf.convert_to_tensor(validation_data[1])
+            assert x_val.shape[0]==y_val.shape[0]
 
         #Initialization of historical training and validation messages
         self.training_messg=[]
@@ -214,8 +226,8 @@ class Sequential(tf.Module):
             if shuffle:
                 x=tf.random.shuffle(x,seed=epoach)
                 y=tf.random.shuffle(y,seed=epoach)
-            self.__reset_metrics()
-            self.__single_epoach_loop(x,y,\
+            self.reset_metrics()
+            self.single_epoach_loop(x,y,\
                                       epoach,\
                                       batch_size,\
                                       total_steps=None,\
@@ -227,12 +239,13 @@ class Sequential(tf.Module):
             if not validation_data:
                 continue
             x_val,y_val=validation_data
+            x_val,y_val=tf.convert_to_tensor(x_val),tf.convert_to_tensor(y_val)
             if shuffle:
                 x_val=tf.random.shuffle(x_val,seed=epoach)
                 y_val=tf.random.shuffle(y_val,seed=epoach)
             validation_batch_size=int(batch_size) if not validation_batch_size else int(validation_batch_size)
-            self.__reset_metrics()
-            self.__single_epoach_loop(x_val,y_val,\
+            self.reset_metrics()
+            self.single_epoach_loop(x_val,y_val,\
                                       epoach,\
                                       validation_batch_size,\
                                       total_steps=validation_steps,\
@@ -248,8 +261,40 @@ if __name__=='__main__':
     data=np.load(os.path.join('..','data_sets','mnist.npz'))
     x_test,y_test,x_train,y_train=data['x_test'],data['y_test'],data['x_train'],data['y_train']
     y_test,y_train=to_categorical(y_test),to_categorical(y_train)
-
+    x_test,x_train=tf.reshape(x_test,[-1,784]),tf.reshape(x_train,[-1,784])
     
+
     #define the model
     from tensorflow.keras.optimizers import Adam
+    from tensorflow.keras.metrics import CategoricalAccuracy    
+    from tensorflow.keras.losses import CategoricalCrossentropy
+    from tensorflow.keras.optimizers.schedules import ExponentialDecay
+    import copy
 
+    layer_configs=copy.deepcopy(default_layer_configs)
+    layer_configs['fourier']['grid_size']=10
+
+    model=Sequential(in_size=784,\
+                     n_neurons=[500,250,125,10],
+                     layer_types=['fourier','fourier','fourier','fourier'],\
+                     layer_configs=layer_configs,\
+                     post_ac_func=tf.nn.softmax,\
+                     name_prefix='Sequential_fourier')
+    model.build()
+
+    lr_schedule=ExponentialDecay(1e-3,decay_steps=1000,decay_rate=0.96,staircase=True)
+    optimizer=Adam(learning_rate=lr_schedule)
+    model.setup(optimizer=optimizer,\
+                loss=CategoricalCrossentropy(),\
+                metrics=[CategoricalAccuracy()])
+
+    model.train(x_train,y_train,\
+                batch_size=64,\
+                epoachs=5,\
+                shuffle=True,\
+                validation_data=(x_test,y_test),\
+                print_freq=5,\
+                validation_batch_size=64,
+                validation_steps=10)
+    model.save('saved_model')
+    
