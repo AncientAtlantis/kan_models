@@ -38,7 +38,7 @@ class FourierKanLayer(tf.Module):
                                         trainable=True)
             self.pi=tf.constant(3.1415926,dtype=self.precision)
             self.is_build=True
-    
+
     @tf.function
     def __call__(self,inputs):
         if not self.is_build:
