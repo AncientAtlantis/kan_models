@@ -139,7 +139,6 @@ class Sequential(tf.Module):
         self.optimizer=optimizer
         self.loss=loss
         self.metrics=metrics
-#        self._track_trackable(self.metrics,'metrics')
         self.is_compiled=True
 
 
@@ -173,13 +172,15 @@ class Sequential(tf.Module):
         #The inner loop 
         start_time=tf.timestamp()
         for step in range(total_steps):
+
             #The accumulated training steps
             acc_steps=step+total_steps*epoach
 
             #Draw a batch from data set
             idx_beg=step*batch_size
             x_batch,y_batch=x[idx_beg:idx_beg+batch_size],y[idx_beg:idx_beg+batch_size]
-            
+
+
             #Perform a single step
             if apply_gradient:
                 loss=train_step(self,x_batch,y_batch)
@@ -277,7 +278,7 @@ if __name__=='__main__':
     import copy
 
     layer_configs=copy.deepcopy(default_layer_configs)
-    layer_configs['fourier']['grid_size']=10
+    layer_configs['fourier']['grid_size']=20
 
     model=Sequential(in_size=784,\
                      n_neurons=[784,10],

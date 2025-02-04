@@ -47,11 +47,13 @@ class FourierKanLayer(tf.Module):
         """
             The forward propagation
         """
+
+        #t0=tf.timestamp()
         #Map inputs within (-pi, pi)
         inputs=tf.cast(inputs,self.precision)
         inputs=tf.math.tanh(tf.cast(inputs,self.precision))*self.pi
-
-
+        
+        #t1=tf.timestamp()  
         """
             Build the batch matrix of fourier bias
         """
@@ -63,19 +65,36 @@ class FourierKanLayer(tf.Module):
         #k: (out_size, grid_size)
         k=tf.range(0,self.grid_size,dtype=self.precision)
         k=tf.tile(tf.expand_dims(k,axis=0),[self.out_size,1])
-        #batch_mat_sin: (..., in_size, out_size, grid_size)        
+        #batch_mat_sin, batch_mat_cos: (..., in_size, out_size, grid_size)        
         batch_mat_cos=tf.math.cos(xs*k)
         batch_mat_sin=tf.math.sin(xs*k)
 
+        #t2=tf.timestamp()  
         """
             Compose outputs 
         """
         #matrix: (..., in_size, out_size)
-        matrix_alpha=tf.einsum('...ijk,ijk->...ij',batch_mat_cos,self.coeff_alpha)
-        matrix_beta=tf.einsum('...ijk,ijk->...ij',batch_mat_sin,self.coeff_beta)
-
+        #matrix_alpha=tf.einsum('...ijk,ijk->...ij',batch_mat_cos,self.coeff_alpha)
+        #matrix_beta=tf.einsum('...ijk,ijk->...ij',batch_mat_sin,self.coeff_beta)
+        matrix_alpha=tf.reduce_sum(batch_mat_cos*self.coeff_alpha,axis=-1)
+        matrix_beta=tf.reduce_sum(batch_mat_sin*self.coeff_beta,axis=-1)
+        #t3=tf.timestamp()
         #outputs: (..., out_size)
         outputs=tf.math.reduce_sum(matrix_alpha+matrix_beta,axis=-2)
+        #t4=tf.timestamp()
+
+        #tf.print('total')
+        #tf.print(t4-t0)
+        #tf.print('inputs')
+        #tf.print(t1-t0)
+        #tf.print('build batch')
+        #tf.print(t2-t1)
+        #tf.print('computes')
+        #tf.print(t3-t2)
+        #tf.print('outputs')
+        #tf.print(t4-t3)
+        #tf.print()
+
         return outputs
 
 
