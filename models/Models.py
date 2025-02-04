@@ -281,14 +281,14 @@ if __name__=='__main__':
     layer_configs['fourier']['grid_size']=20
 
     model=Sequential(in_size=784,\
-                     n_neurons=[784,10],
-                     layer_types=['fourier','fourier'],\
+                     n_neurons=[10],
+                     layer_types=['segmentv2'],\
                      layer_configs=layer_configs,\
                      post_ac_func=tf.nn.softmax,\
-                     name_prefix='Sequential_mlp')
+                     name_prefix='Sequential_spline')
     model.build()
 
-    lr_schedule=ExponentialDecay(1e-3,decay_steps=500,decay_rate=0.95,staircase=True)
+    lr_schedule=ExponentialDecay(1e-3,decay_steps=200,decay_rate=0.93,staircase=True)
     optimizer=Adam(learning_rate=lr_schedule)
     model.setup(optimizer=optimizer,\
                 loss=CategoricalCrossentropy(),\
@@ -296,7 +296,7 @@ if __name__=='__main__':
 
     model.train(x_train,y_train,\
                 batch_size=32,\
-                epoachs=1,\
+                epoachs=5,\
                 shuffle=True,\
                 validation_data=(x_test,y_test),\
                 print_freq=10,\

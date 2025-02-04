@@ -76,9 +76,9 @@ class SegmentKanLayer(tf.Module):
             seg_idx_h=tf.expand_dims(seg_idx_h,axis=-1)
             seg_idx_l=tf.expand_dims(seg_idx_l,axis=-1)
             mods=tf.expand_dims(mods,axis=-1)
-        zeros=tf.zeros([self.in_size,1],dtype=self.precision)
-        seg_idx_h=seg_idx_h+zeros
-        seg_idx_l=seg_idx_l+zeros
+        zeros=tf.zeros([self.in_size,self.out_size,1],dtype=self.precision)
+        seg_idx_h=seg_idx_h+tf.cast(zeros,self.idx_precision)
+        seg_idx_l=seg_idx_l+tf.cast(zeros,self.idx_precision)
         mods=mods+zeros
 
         #IN, OUT: (..., in_size, out_size, 1)
@@ -90,8 +90,9 @@ class SegmentKanLayer(tf.Module):
             for i in range(len(self.inputs_shape)-1):
                 IN=tf.expand_dims(IN,axis=0)
                 OUT=tf.expand_dims(OUT,axis=0)
-        indices_l=tf.concatnate([IN,OUT,seg_idx_l],axis=-1)
-        indices_h=tf.concatnate([IN,OUT,seg_idx_h],axis=-1)
+        zeros=tf.zeros_like(seg_idx_h)
+        indices_l=tf.concat([IN+zeros,OUT+zeros,seg_idx_l],axis=-1)
+        indices_h=tf.concat([IN+zeros,OUT+zeros,seg_idx_h],axis=-1)
 
 
         """
@@ -185,14 +186,15 @@ class SegmentKanLayerV2(tf.Module):
 
         #batch_matrix: (..., in_size, out_size, grid_size-1)
         #grids: (in_size, out_size, grid_size)
-        batch_matrix=tf.cast(xs>=self.grids[:,:,:-1] & xs<self.grids[:,:,1:],\
+        batch_matrix=tf.cast((xs>=self.grids[:,:,:-1]) & (xs<self.grids[:,:,1:]),\
                              self.precision)
 
         """
             Compose the weight matrix 
         """
         #matrix: (..., in_size, out_size)
-        matrix=tf.einsum('...ijk,ijk->...ij',batch_matrix,self.coeff)
+        #matrix=tf.einsum('...ijk,ijk->...ij',batch_matrix,self.coeff)
+        matrix=tf.math.reduce_sum((batch_matrix*self.coeff),axis=-1)
 
         #outputs: (..., out_size, 1)
         outputs=tf.matmul(matrix,tf.expand_dims(inputs,axis=-1),transpose_a=True)

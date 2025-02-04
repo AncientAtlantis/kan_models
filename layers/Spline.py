@@ -59,15 +59,15 @@ class SplineKanLayer(tf.Module):
             self.is_build=True
     
     def build_B_batch(self,xs,grids,k,epsilon=1e-8):
-        xs=tf.expand_dims(xs,axis=-1)
-        #grids: (0, in_dims, G+2k+1)
-        grids=tf.expand_dims(grids,axis=0)
+        #xs: (..., in, 1, 1)
+        xs=tf.expand_dims(tf.expand_dims(xs,axis=-1),axis=-1)
+        #grids: (in, out, G+2k+1)
         if k==0:
             values=tf.cast((xs>=grids[:,:,:-1]) & (xs<grids[:,:,1:]),self.precision)
         else:
-            B_kml=self.build_B_batch(xs[:,:,0],grids[0],k-1)
-            values=B_kml[:,:,:-1]*(xs-grids[:,:,:-(k + 1)])/(grids[:,:,k:-1]-grids[:,:,:-(k+1)]+epsilon)+B_kml[:,:,1:]*(grids[:,:,k+1:]-xs)/(grids[:,:,k+1:]-grids[:,:,1:-k]+epsilon)
-        #values: (in, out, grid_size-1+k)
+            B_kml=self.build_B_batch(xs[...,0,0],grids,k-1)
+            values=B_kml[:,:,:,:-1]*(xs-grids[:,:,:-(k + 1)])/(grids[:,:,k:-1]-grids[:,:,:-(k+1)]+epsilon)+B_kml[:,:,:,1:]*(grids[:,:,k+1:]-xs)/(grids[:,:,k+1:]-grids[:,:,1:-k]+epsilon)
+        #values: (batch, in, out, grid_size-1+k)
         return values
 
     def __call__(self,inputs):
@@ -86,7 +86,7 @@ class SplineKanLayer(tf.Module):
         """
             Build the batch matrix of b-spline bias
         """
-        #mat: (in, out, grid_size-1+k)
+        #mat: (..., in, out, grid_size-1+k)
         mat=self.build_B_batch(inputs,self.grids,self.k)
 
 
@@ -94,8 +94,9 @@ class SplineKanLayer(tf.Module):
             Compose outputs 
 
         """
-        #values, v_base: (in, out)
-        values=tf.einsum('ijk,ijk->ij',mat,self.coeff)
+        #values, v_base: (..., in, out)
+        #values=tf.einsum('ijk,ijk->ij',mat,self.coeff)
+        values=tf.math.reduce_sum((mat*self.coeff),axis=-1)
         v_base=values*self.scale_bases
         #v_biases: (..., in, out)
         inputs=tf.expand_dims(self.bias_functioin(inputs),axis=-1) #(..., in, 1)
