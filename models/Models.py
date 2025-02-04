@@ -56,6 +56,24 @@ default_layer_configs={'fourier':{\
                             'precision':tf.float32,\
                         }}
 
+@tf.function
+def train_step(self,x_batch,y_batch):
+    #Apply gradients and update metrics
+    with tf.GradientTape() as tape:
+        y_pred_batch=self(x_batch)
+        loss=self.loss(y_batch,y_pred_batch)
+    grads=tape.gradient(loss,self.trainable_variables)
+    self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
+    self.update_metrics(y_batch,y_pred_batch)
+    return loss
+    
+@tf.function
+def validation_step(self,x_val_batch,y_val_batch):
+    y_val_batch_pred=self(x_val_batch)
+    loss=self.loss(y_val_batch,y_val_batch_pred)
+    self.update_metrics(y_val_batch,y_val_batch_pred)
+    return loss
+    
 
 class Sequential(tf.Module):
     """
@@ -81,7 +99,7 @@ class Sequential(tf.Module):
             cfg=layer_configs[l_type]
             self.layers.append((type_map[l_type])(in_dim,out_dim,**cfg,name_prefix=prefix))            
         self.is_build=False
-        self.is_build=False
+        self.is_compiled=False
     
     def build(self):
         if not self.is_build:
@@ -92,6 +110,8 @@ class Sequential(tf.Module):
                     li.build(in_dim)
             self.is_build=True
 
+
+    @tf.function
     def __call__(self,inputs):
         if not self.is_build:
             self.build()
@@ -119,6 +139,7 @@ class Sequential(tf.Module):
         self.optimizer=optimizer
         self.loss=loss
         self.metrics=metrics
+#        self._track_trackable(self.metrics,'metrics')
         self.is_compiled=True
 
 
@@ -131,25 +152,6 @@ class Sequential(tf.Module):
         for mi in self.metrics:
             mi.reset_state()
 
-
-    @tf.function
-    def train_step(self,x_batch,y_batch):
-        #Apply gradients and update metrics
-        with tf.GradientTape() as tape:
-            y_pred_batch=self(x_batch)
-            loss=self.loss(y_batch,y_pred_batch)
-        grads=tape.gradient(loss,self.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
-        self.update_metrics(y_batch,y_pred_batch)
-        return loss
-    
-    @tf.function
-    def validation_step(self,x_val_batch,y_val_batch):
-        y_val_batch_pred=self(x_val_batch)
-        loss=self.loss(y_val_batch,y_val_batch_pred)
-        self.update_metrics(y_val_batch,y_val_batch_pred)
-        return loss
-    
 
     def single_epoach_loop(self,\
                              x,\
@@ -180,9 +182,9 @@ class Sequential(tf.Module):
             
             #Perform a single step
             if apply_gradient:
-                loss=self.train_step(x_batch,y_batch)
+                loss=train_step(self,x_batch,y_batch)
             else:
-                loss=self.validation_step(x_batch,y_batch)            
+                loss=validation_step(self,x_batch,y_batch)            
             
             #Outputs key infos every print_freq steps
             if acc_steps%print_freq==0:
@@ -195,6 +197,8 @@ class Sequential(tf.Module):
                     messg=messg+messg_add
                 tf.print(messg)
                 messg_container.append(messg)
+                #tf.print(self.trainable_variables[9])
+
 
     def train(self,\
               x=None,\
@@ -262,6 +266,7 @@ if __name__=='__main__':
     x_test,y_test,x_train,y_train=data['x_test'],data['y_test'],data['x_train'],data['y_train']
     y_test,y_train=to_categorical(y_test),to_categorical(y_train)
     x_test,x_train=tf.reshape(x_test,[-1,784]),tf.reshape(x_train,[-1,784])
+    x_test,x_train=tf.cast(x_test/255,tf.float32),tf.cast(x_train/255,tf.float32)
     
 
     #define the model
@@ -275,26 +280,30 @@ if __name__=='__main__':
     layer_configs['fourier']['grid_size']=10
 
     model=Sequential(in_size=784,\
-                     n_neurons=[500,250,125,10],
-                     layer_types=['fourier','fourier','fourier','fourier'],\
+                     n_neurons=[784,10],
+                     layer_types=['fourier','fourier'],\
                      layer_configs=layer_configs,\
                      post_ac_func=tf.nn.softmax,\
-                     name_prefix='Sequential_fourier')
+                     name_prefix='Sequential_mlp')
     model.build()
 
-    lr_schedule=ExponentialDecay(1e-3,decay_steps=1000,decay_rate=0.96,staircase=True)
+    lr_schedule=ExponentialDecay(1e-3,decay_steps=500,decay_rate=0.95,staircase=True)
     optimizer=Adam(learning_rate=lr_schedule)
     model.setup(optimizer=optimizer,\
                 loss=CategoricalCrossentropy(),\
                 metrics=[CategoricalAccuracy()])
 
     model.train(x_train,y_train,\
-                batch_size=64,\
-                epoachs=5,\
+                batch_size=32,\
+                epoachs=1,\
                 shuffle=True,\
                 validation_data=(x_test,y_test),\
-                print_freq=5,\
-                validation_batch_size=64,
-                validation_steps=10)
-    model.save('saved_model')
+                print_freq=10,\
+                validation_batch_size=32,
+                validation_steps=None)
+    
+    signatures = {
+        "serving_default": model.__call__.get_concrete_function(tf.TensorSpec([None, 784], tf.float32))
+    }
+    tf.saved_model.save(model,'saved_model_fourier',signatures=signatures,options=tf.saved_model.SaveOptions(function_aliases={}))
     

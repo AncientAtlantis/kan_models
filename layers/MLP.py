@@ -48,6 +48,8 @@ class MLPLayer(tf.Module):
         #inputs: (..., in)
         #w: (in, out)
         inputs=tf.cast(inputs,self.precision)
+        mean,variance=tf.nn.moments(inputs, axes=[-1], keepdims=True)
+        inputs=(inputs-mean)/tf.sqrt(variance+1e-6)
         hidden=tf.nn.bias_add(tf.matmul(inputs,self.w),self.b)
         return self.bias_function(hidden)
 
