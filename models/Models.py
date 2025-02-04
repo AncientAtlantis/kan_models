@@ -282,7 +282,7 @@ if __name__=='__main__':
 
     model=Sequential(in_size=784,\
                      n_neurons=[10],
-                     layer_types=['segmentv2'],\
+                     layer_types=['spline'],\
                      layer_configs=layer_configs,\
                      post_ac_func=tf.nn.softmax,\
                      name_prefix='Sequential_spline')
