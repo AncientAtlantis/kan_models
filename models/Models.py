@@ -3,6 +3,7 @@ import os
 sys.path.append(os.path.join('..','..'))
 
 import tensorflow as tf
+from tensorflow.keras import backend as K
 
 from kan_models.layers.Fourier import FourierKanLayer
 from kan_models.layers.MLP import MLPLayer
@@ -19,7 +20,7 @@ type_map={'fourier':FourierKanLayer,\
 
 
 default_layer_configs={'fourier':{\
-                            'grid_size':20,\
+                            'grid_size':10,\
                             'alpha_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
                             'beta_initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
                             'precision':tf.float32,\
@@ -48,6 +49,7 @@ default_layer_configs={'fourier':{\
                             'initializer':tf.random_normal_initializer(mean=0.0,stddev=0.1),\
                             'precision':tf.float32,\
                             'idx_precision':tf.int32,\
+                            'order':0
                             },
                         'segmentv2':{
                             'grid_size':10,\
@@ -56,23 +58,6 @@ default_layer_configs={'fourier':{\
                             'precision':tf.float32,\
                         }}
 
-@tf.function
-def train_step(self,x_batch,y_batch):
-    #Apply gradients and update metrics
-    with tf.GradientTape() as tape:
-        y_pred_batch=self(x_batch)
-        loss=self.loss(y_batch,y_pred_batch)
-    grads=tape.gradient(loss,self.trainable_variables)
-    self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
-    self.update_metrics(y_batch,y_pred_batch)
-    return loss
-    
-@tf.function
-def validation_step(self,x_val_batch,y_val_batch):
-    y_val_batch_pred=self(x_val_batch)
-    loss=self.loss(y_val_batch,y_val_batch_pred)
-    self.update_metrics(y_val_batch,y_val_batch_pred)
-    return loss
     
 
 class Sequential(tf.Module):
@@ -86,20 +71,29 @@ class Sequential(tf.Module):
                  layer_configs=default_layer_configs,\
                  post_ac_func=tf.nn.softmax,\
                  precision=tf.float32,\
-                 name_prefix='Sequential'):
+                 name_prefix='Sequential',\
+                 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),\
+                 loss=tf.keras.losses.CategoricalCrossentropy(),
+                 metrics=[tf.keras.metrics.CategoricalAccuracy()]):
         super().__init__(name=name_prefix)
         self.layers=[]
         self.in_dims=[]
+        self.in_size=in_size
+        self.out_size=n_neurons[-1]
         self.layer_types=layer_types
+        self.precision=precision
         self.post_ac_func=post_ac_func
         for layer,(out_dim,l_type) in enumerate(zip(n_neurons,layer_types)):
             in_dim=in_size if layer==0 else n_neurons[layer-1]
             self.in_dims.append(in_dim)
             prefix=name_prefix+'_'+l_type+'_{:d}'.format(layer)
             cfg=layer_configs[l_type]
-            self.layers.append((type_map[l_type])(in_dim,out_dim,**cfg,name_prefix=prefix))            
+            self.layers.append((type_map[l_type])(in_dim,out_dim,**cfg,name_prefix=prefix))
+        
+        self.optimizer=optimizer
+        self.loss=loss
+        self.metrics=metrics
         self.is_build=False
-        self.is_compiled=False
     
     def build(self):
         if not self.is_build:
@@ -116,12 +110,12 @@ class Sequential(tf.Module):
         if not self.is_build:
             self.build()
 
-
         """
             The forward propagation
         """
         for i,layer in enumerate(self.layers):
             if i==0:
+                inputs=tf.cast(inputs,self.precision)
                 outs=layer(inputs)
             else:
                 outs=layer(outs)
@@ -130,16 +124,6 @@ class Sequential(tf.Module):
             return self.post_ac_func(outs)
         else:
             return outs
-
-
-    def setup(self,\
-              optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),\
-              loss=tf.keras.losses.CategoricalCrossentropy(),
-              metrics=[tf.keras.metrics.CategoricalAccuracy()]):
-        self.optimizer=optimizer
-        self.loss=loss
-        self.metrics=metrics
-        self.is_compiled=True
 
 
     def update_metrics(self,y,y_pred):
@@ -151,6 +135,21 @@ class Sequential(tf.Module):
         for mi in self.metrics:
             mi.reset_state()
 
+    @tf.function
+    def train_step(self,x_batch,y_batch):
+        #Apply gradients and update metrics
+        with tf.GradientTape() as tape:
+            y_pred_batch=self(x_batch)
+            loss=self.loss(y_batch,y_pred_batch)
+        grads=tape.gradient(loss,self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads,self.trainable_variables))
+        return loss,y_pred_batch
+    
+    @tf.function
+    def validation_step(self,x_val_batch,y_val_batch):
+        y_val_batch_pred=self(x_val_batch)
+        loss=self.loss(y_val_batch,y_val_batch_pred)
+        return loss,y_val_batch_pred
 
     def single_epoach_loop(self,\
                              x,\
@@ -183,10 +182,12 @@ class Sequential(tf.Module):
 
             #Perform a single step
             if apply_gradient:
-                loss=train_step(self,x_batch,y_batch)
+                loss,y_pred=self.train_step(x_batch,y_batch)
+                self.update_metrics(y_batch,y_pred)
             else:
-                loss=validation_step(self,x_batch,y_batch)            
-            
+                loss,y_pred=self.validation_step(x_batch,y_batch)            
+                self.update_metrics(y_batch,y_pred)
+
             #Outputs key infos every print_freq steps
             if acc_steps%print_freq==0:
                 end_time=tf.timestamp()
@@ -198,7 +199,7 @@ class Sequential(tf.Module):
                     messg=messg+messg_add
                 tf.print(messg)
                 messg_container.append(messg)
-                #tf.print(self.trainable_variables[9])
+
 
 
     def train(self,\
@@ -213,13 +214,16 @@ class Sequential(tf.Module):
               validation_steps=None):
         
         #assertations of data types and shapes
-        assert self.is_compiled
+        assert self.is_build
         x,y=tf.convert_to_tensor(x),tf.convert_to_tensor(y)
         assert x.shape[0]==y.shape[0]
         if validation_data:
             assert len(validation_data)==2
             x_val,y_val=tf.convert_to_tensor(validation_data[0]),tf.convert_to_tensor(validation_data[1])
             assert x_val.shape[0]==y_val.shape[0]
+            #x_val,y_val=tf.cast(x_val,self.precision),tf.cast(y_val,self.precision)
+        #x,y=tf.cast(x,self.precision),tf.cast(y,self.precision)
+        
 
         #Initialization of historical training and validation messages
         self.training_messg=[]
@@ -233,31 +237,29 @@ class Sequential(tf.Module):
                 y=tf.random.shuffle(y,seed=epoach)
             self.reset_metrics()
             self.single_epoach_loop(x,y,\
-                                      epoach,\
-                                      batch_size,\
-                                      total_steps=None,\
-                                      apply_gradient=True,\
-                                      print_freq=print_freq,\
-                                      messg_prefix='Training step',\
-                                      messg_container=self.training_messg)            
+                                    epoach,\
+                                    batch_size,\
+                                    total_steps=None,\
+                                    apply_gradient=True,\
+                                    print_freq=print_freq,\
+                                    messg_prefix='Training step',\
+                                    messg_container=self.training_messg)            
             #Single epoach over the validation data set
             if not validation_data:
                 continue
-            x_val,y_val=validation_data
-            x_val,y_val=tf.convert_to_tensor(x_val),tf.convert_to_tensor(y_val)
             if shuffle:
                 x_val=tf.random.shuffle(x_val,seed=epoach)
                 y_val=tf.random.shuffle(y_val,seed=epoach)
             validation_batch_size=int(batch_size) if not validation_batch_size else int(validation_batch_size)
             self.reset_metrics()
             self.single_epoach_loop(x_val,y_val,\
-                                      epoach,\
-                                      validation_batch_size,\
-                                      total_steps=validation_steps,\
-                                      apply_gradient=False,\
-                                      print_freq=print_freq,\
-                                      messg_prefix='Validation step',\
-                                      messg_container=self.validation_messg)
+                                    epoach,\
+                                    validation_batch_size,\
+                                    total_steps=validation_steps,\
+                                    apply_gradient=False,\
+                                    print_freq=print_freq,\
+                                    messg_prefix='Validation step',\
+                                    messg_container=self.validation_messg)
 
 if __name__=='__main__':
     #load the data set
@@ -278,21 +280,20 @@ if __name__=='__main__':
     import copy
 
     layer_configs=copy.deepcopy(default_layer_configs)
-    layer_configs['fourier']['grid_size']=20
-
-    model=Sequential(in_size=784,\
-                     n_neurons=[10],
-                     layer_types=['spline'],\
-                     layer_configs=layer_configs,\
-                     post_ac_func=tf.nn.softmax,\
-                     name_prefix='Sequential_spline')
-    model.build()
 
     lr_schedule=ExponentialDecay(1e-3,decay_steps=200,decay_rate=0.93,staircase=True)
     optimizer=Adam(learning_rate=lr_schedule)
-    model.setup(optimizer=optimizer,\
-                loss=CategoricalCrossentropy(),\
-                metrics=[CategoricalAccuracy()])
+
+    model=Sequential(in_size=784,\
+                     n_neurons=[10],
+                     layer_types=['segment'],\
+                     layer_configs=layer_configs,\
+                     post_ac_func=tf.nn.softmax,\
+                     name_prefix='Sequential_spline',\
+                     optimizer=optimizer,\
+                     loss=CategoricalCrossentropy(),\
+                     metrics=[CategoricalAccuracy()])
+    model.build()
 
     model.train(x_train,y_train,\
                 batch_size=32,\

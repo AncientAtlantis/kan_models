@@ -12,6 +12,7 @@ class SegmentKanLayer(tf.Module):
                  initializer=tf.random_normal_initializer(mean=0.0,stddev=0.1),
                  precision=tf.float32,
                  idx_precision=tf.int32,
+                 order=0,
                  name_prefix='SegmentKanLayer'):
         
         super().__init__(name=name_prefix)
@@ -22,6 +23,7 @@ class SegmentKanLayer(tf.Module):
         self.initializer=initializer
         self.precision=precision
         self.idx_precision=idx_precision
+        self.order=order
         self.name_prefix=name_prefix    
         self.is_build=False
     
@@ -90,7 +92,7 @@ class SegmentKanLayer(tf.Module):
             for i in range(len(self.inputs_shape)-1):
                 IN=tf.expand_dims(IN,axis=0)
                 OUT=tf.expand_dims(OUT,axis=0)
-        zeros=tf.zeros_like(seg_idx_h)
+        zeros=tf.zeros_like(seg_idx_l)
         indices_l=tf.concat([IN+zeros,OUT+zeros,seg_idx_l],axis=-1)
         indices_h=tf.concat([IN+zeros,OUT+zeros,seg_idx_h],axis=-1)
 
@@ -99,11 +101,13 @@ class SegmentKanLayer(tf.Module):
             Draw coeff from indices
         """
         #matrix_l, matrix_h, matrix: (..., in_size, out_size)
-        matrix_l=tf.gather_nd(self.coeff,indices_l)
-        matrix_h=tf.gather_nd(self.coeff,indices_h)
-        mods=tf.squeeze(mods)
-        matrix=matrix_l*(tf.cast(1.0,self.precision)-mods)+\
-               matrix_h*mods
+        if self.order==0:
+            matrix=tf.gather_nd(self.coeff,indices_l)
+        else:
+            matrix_h=tf.gather_nd(self.coeff,indices_h)
+            mods=tf.squeeze(mods)
+            matrix=matrix_l*(tf.cast(1.0,self.precision)-mods)+\
+                   matrix_h*mods
         
         #Outputs: (..., out_size)
         outputs=tf.matmul(matrix,tf.expand_dims(inputs,axis=-1),transpose_a=True)
